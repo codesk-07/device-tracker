@@ -174,9 +174,22 @@ export default function Home() {
     }
   }
 
-  async function loadLatestLocation(deviceId: string) {
+  async function refreshSelectedLocation() {
+    if (!selectedDeviceId) {
+      setMessage("Select a device first.");
+      return;
+    }
+
+    await loadLatestLocation(selectedDeviceId, true);
+  }
+
+  async function loadLatestLocation(deviceId: string, showStatus = false) {
     if (!supabase) {
       return;
+    }
+
+    if (showStatus) {
+      setMessage("Refreshing latest saved location...");
     }
 
     const { data, error } = await supabase
@@ -188,6 +201,9 @@ export default function Home() {
       .maybeSingle<LocationRow>();
 
     if (error || !data) {
+      if (showStatus) {
+        setMessage("No saved location found for this device yet.");
+      }
       return;
     }
 
@@ -200,7 +216,7 @@ export default function Home() {
       recordedAt: new Date(data.created_at).toLocaleString(),
       placeName,
     });
-    setMessage("Showing latest saved location for this device.");
+    setMessage(showStatus ? "Latest saved location refreshed." : "Showing latest saved location for this device.");
   }
 
   async function handleAuth(event: React.FormEvent<HTMLFormElement>) {
@@ -516,7 +532,7 @@ export default function Home() {
                       Logout
                     </button>
                   </div>
-                  <p className="mt-2 text-sm text-[#5d6678]">Locations save every 30 seconds while tracking is active.</p>
+                  <p className="mt-2 text-sm text-[#5d6678]">Use this same account on another phone or laptop to view the latest saved location.</p>
                 </div>
               ) : (
                 <form onSubmit={handleAuth} className="space-y-4">
@@ -560,11 +576,12 @@ export default function Home() {
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <button type="button" onClick={startTracking} disabled={isTracking} className="h-12 rounded-md bg-[#2f5f3a] px-4 text-sm font-semibold text-white transition hover:bg-[#264e30] disabled:cursor-not-allowed disabled:bg-[#9fb7a4]">Start</button>
                 <button type="button" onClick={stopTracking} disabled={!isTracking} className="h-12 rounded-md border border-[#c9d1df] bg-white px-4 text-sm font-semibold text-[#263041] transition hover:bg-[#f1f4f8] disabled:cursor-not-allowed disabled:text-[#9aa3b2]">Stop</button>
-                <button type="button" onClick={showDemoLocation} className="col-span-2 h-12 rounded-md border border-[#c9d1df] bg-[#f7f8fb] px-4 text-sm font-semibold text-[#263041] transition hover:bg-[#eef2f7]">Demo Map</button>
+                <button type="button" onClick={refreshSelectedLocation} disabled={!selectedDeviceId} className="col-span-2 h-12 rounded-md border border-[#c9d1df] bg-[#f7f8fb] px-4 text-sm font-semibold text-[#263041] transition hover:bg-[#eef2f7] disabled:cursor-not-allowed disabled:text-[#9aa3b2]">Refresh Latest Location</button>
+                <button type="button" onClick={showDemoLocation} className="col-span-2 h-12 rounded-md border border-[#c9d1df] bg-white px-4 text-sm font-semibold text-[#263041] transition hover:bg-[#eef2f7]">Demo Map</button>
               </div>
 
               <div className="mt-5 rounded-md bg-[#f1f4f8] p-4 text-sm leading-6 text-[#4b5567]">
-                Mobile tracking works best from the installed HTTPS PWA.
+                Keep the tracking device open. View from another device by logging in with the same account and pressing Refresh Latest Location.
               </div>
 
               <div className="mt-4 grid gap-3 rounded-md border border-[#dfe3eb] bg-white p-4 text-sm">
@@ -584,14 +601,14 @@ export default function Home() {
             </div>
 
             <div className="mt-5 rounded-lg border border-[#dfe3eb] bg-[#fbfcfe] p-5">
-              <p className="text-sm font-medium text-[#687386]">Nearby place</p>
+              <p className="text-sm font-medium text-[#687386]">Latest known place</p>
               <p className="mt-2 text-2xl font-semibold text-[#182033]">
                 {location ? location.placeName : "--"}
               </p>
               <div className="mt-4 grid gap-3 text-sm text-[#5d6678] sm:grid-cols-3">
                 <p>Accuracy: {location ? Math.round(location.accuracy) + " m" : "--"}</p>
-                <p>Latitude: {location ? location.latitude.toFixed(5) : "--"}</p>
-                <p>Longitude: {location ? location.longitude.toFixed(5) : "--"}</p>
+                <p className="break-words">Lat: {location ? location.latitude.toFixed(5) : "--"}</p>
+                <p className="break-words">Lng: {location ? location.longitude.toFixed(5) : "--"}</p>
               </div>
             </div>
 
@@ -602,7 +619,7 @@ export default function Home() {
                 <div className="flex min-h-80 items-center justify-center p-6 text-center">
                   <div>
                     <p className="text-lg font-semibold text-[#253044]">{isTracking ? "Waiting for GPS" : "Location map"}</p>
-                    <p className="mt-2 max-w-md text-sm leading-6 text-[#5d6678]">{isTracking ? "Keep this page open. On mobile, the map appears after the first GPS reading." : "Create/select a device, click Start, and allow location permission."}</p>
+                    <p className="mt-2 max-w-md text-sm leading-6 text-[#5d6678]">{isTracking ? "Keep this page open. On mobile, the map appears after the first GPS reading." : "Select a device to view its latest saved location, or click Start on this device to track it."}</p>
                   </div>
                 </div>
               )}
