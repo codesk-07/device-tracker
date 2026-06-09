@@ -25,6 +25,15 @@ type LocationPoint = {
   longitude: number;
   accuracy: number;
   recordedAt: string;
+  placeName: string;
+};
+
+type LocationRow = {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  place_name: string | null;
+  created_at: string;
 };
 
 export default function Home() {
@@ -32,6 +41,7 @@ export default function Home() {
   const lastSavedAtRef = useRef(0);
   const selectedDeviceIdRef = useRef<string | null>(null);
   const userRef = useRef<User | null>(null);
+  const placeCacheRef = useRef<Record<string, string>>({});
 
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
@@ -54,6 +64,17 @@ export default function Home() {
     selectedDeviceIdRef.current = selectedDeviceId;
   }, [selectedDeviceId]);
 
+  function selectDevice(deviceId: string) {
+    const device = devices.find((item) => item.id === deviceId);
+    setSelectedDeviceId(deviceId);
+
+    if (device) {
+      setDeviceName(device.name);
+      setDeviceType(device.type);
+      loadLatestLocation(device.id);
+    }
+  }
+
   useEffect(() => {
     userRef.current = session?.user ?? null;
   }, [session]);
@@ -72,6 +93,58 @@ export default function Home() {
       permission.onchange = () => setPermissionState(permission.state);
     } catch {
       setPermissionState("Not available");
+    }
+  }
+
+  function fallbackPlaceName(latitude: number, longitude: number) {
+    return "Near " + latitude.toFixed(4) + ", " + longitude.toFixed(4);
+  }
+
+  function formatPlaceName(data: {
+    display_name?: string;
+    address?: Record<string, string>;
+  }) {
+    const address = data.address ?? {};
+    const parts = [
+      address.neighbourhood,
+      address.suburb,
+      address.city || address.town || address.village,
+      address.state,
+      address.country,
+    ].filter(Boolean);
+
+    if (parts.length) {
+      return Array.from(new Set(parts)).slice(0, 4).join(", ");
+    }
+
+    return data.display_name?.split(",").slice(0, 4).join(",").trim() || "Nearby place unavailable";
+  }
+
+  async function getPlaceName(latitude: number, longitude: number) {
+    const cacheKey = latitude.toFixed(4) + "," + longitude.toFixed(4);
+    if (placeCacheRef.current[cacheKey]) {
+      return placeCacheRef.current[cacheKey];
+    }
+
+    try {
+      const params = new URLSearchParams({
+        format: "jsonv2",
+        lat: String(latitude),
+        lon: String(longitude),
+        addressdetails: "1",
+      });
+      const response = await fetch("https://nominatim.openstreetmap.org/reverse?" + params);
+
+      if (!response.ok) {
+        throw new Error("Place lookup failed");
+      }
+
+      const data = await response.json();
+      const placeName = formatPlaceName(data);
+      placeCacheRef.current[cacheKey] = placeName;
+      return placeName;
+    } catch {
+      return fallbackPlaceName(latitude, longitude);
     }
   }
 
@@ -97,7 +170,37 @@ export default function Home() {
       setSelectedDeviceId(data[0].id);
       setDeviceName(data[0].name);
       setDeviceType(data[0].type);
+      loadLatestLocation(data[0].id);
     }
+  }
+
+  async function loadLatestLocation(deviceId: string) {
+    if (!supabase) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("locations")
+      .select("latitude,longitude,accuracy,place_name,created_at")
+      .eq("device_id", deviceId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<LocationRow>();
+
+    if (error || !data) {
+      return;
+    }
+
+    const placeName = data.place_name || (await getPlaceName(data.latitude, data.longitude));
+
+    setLocation({
+      latitude: data.latitude,
+      longitude: data.longitude,
+      accuracy: data.accuracy ?? 0,
+      recordedAt: new Date(data.created_at).toLocaleString(),
+      placeName,
+    });
+    setMessage("Showing latest saved location for this device.");
   }
 
   async function handleAuth(event: React.FormEvent<HTMLFormElement>) {
@@ -168,6 +271,8 @@ export default function Home() {
 
     setDevices((current) => [data, ...current]);
     setSelectedDeviceId(data.id);
+    setDeviceName(data.name);
+    setDeviceType(data.type);
     setMessage("Device saved. Start tracking to save locations.");
   }
 
@@ -196,6 +301,7 @@ export default function Home() {
       latitude: point.latitude,
       longitude: point.longitude,
       accuracy: point.accuracy,
+      place_name: point.placeName,
     });
 
     if (error) {
@@ -203,15 +309,20 @@ export default function Home() {
       return;
     }
 
-    setMessage("Tracking is active. Latest location saved online.");
+    setMessage("Tracking is active. Latest place saved online.");
   }
 
-  function saveLocation(position: GeolocationPosition) {
+  async function saveLocation(position: GeolocationPosition) {
+    const placeName = await getPlaceName(
+      position.coords.latitude,
+      position.coords.longitude,
+    );
     const point = {
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
       accuracy: position.coords.accuracy,
       recordedAt: new Date().toLocaleString(),
+      placeName,
     };
 
     setLocation(point);
@@ -257,6 +368,7 @@ export default function Home() {
       longitude: 77.209,
       accuracy: 25,
       recordedAt: new Date().toLocaleString(),
+      placeName: "New Delhi, Delhi, India",
     });
     setStatus("idle");
     setMessage("Demo map loaded. If this appears, the map works and GPS is the only issue.");
@@ -367,7 +479,7 @@ export default function Home() {
           <div>
             <p className="text-sm font-medium text-[#4f6f52]">Device Tracker</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-normal text-[#14161f]">
-              Active location tracking
+              Device location dashboard
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -440,7 +552,7 @@ export default function Home() {
               </button>
 
               {devices.length ? (
-                <select value={selectedDeviceId ?? ""} onChange={(event) => setSelectedDeviceId(event.target.value)} className="mt-4 h-12 w-full rounded-md border border-[#cfd6e2] bg-white px-3 text-base outline-none transition focus:border-[#52765b] focus:ring-4 focus:ring-[#dcefe0]">
+                <select value={selectedDeviceId ?? ""} onChange={(event) => selectDevice(event.target.value)} className="mt-4 h-12 w-full rounded-md border border-[#cfd6e2] bg-white px-3 text-base outline-none transition focus:border-[#52765b] focus:ring-4 focus:ring-[#dcefe0]">
                   {devices.map((device) => <option key={device.id} value={device.id}>{device.name} ({device.type})</option>)}
                 </select>
               ) : null}
@@ -471,10 +583,16 @@ export default function Home() {
               <p className="text-sm text-[#5d6678]">{location ? location.recordedAt : "No location saved yet"}</p>
             </div>
 
-            <div className="mt-5 grid gap-4 sm:grid-cols-3">
-              <LocationMetric label="Latitude" value={location ? location.latitude.toFixed(6) : "--"} />
-              <LocationMetric label="Longitude" value={location ? location.longitude.toFixed(6) : "--"} />
-              <LocationMetric label="Accuracy" value={location ? Math.round(location.accuracy) + " m" : "--"} />
+            <div className="mt-5 rounded-lg border border-[#dfe3eb] bg-[#fbfcfe] p-5">
+              <p className="text-sm font-medium text-[#687386]">Nearby place</p>
+              <p className="mt-2 text-2xl font-semibold text-[#182033]">
+                {location ? location.placeName : "--"}
+              </p>
+              <div className="mt-4 grid gap-3 text-sm text-[#5d6678] sm:grid-cols-3">
+                <p>Accuracy: {location ? Math.round(location.accuracy) + " m" : "--"}</p>
+                <p>Latitude: {location ? location.latitude.toFixed(5) : "--"}</p>
+                <p>Longitude: {location ? location.longitude.toFixed(5) : "--"}</p>
+              </div>
             </div>
 
             <div className="mt-5 min-h-80 overflow-hidden rounded-lg border border-[#dfe3eb] bg-[#f7f8fb]">
@@ -496,11 +614,3 @@ export default function Home() {
   );
 }
 
-function LocationMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-[#e1e6ee] bg-[#fbfcfe] p-4">
-      <p className="text-sm font-medium text-[#687386]">{label}</p>
-      <p className="mt-2 break-words text-xl font-semibold text-[#182033]">{value}</p>
-    </div>
-  );
-}

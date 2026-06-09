@@ -13,6 +13,7 @@ create table if not exists public.locations (
   latitude double precision not null,
   longitude double precision not null,
   accuracy double precision,
+  place_name text,
   created_at timestamptz not null default now()
 );
 
@@ -52,3 +53,6 @@ drop policy if exists "Users can create own locations" on public.locations;
 create policy "Users can create own locations"
   on public.locations for insert
   with check (auth.uid() = user_id);
+
+
+alter table public.locations add column if not exists place_name text;
