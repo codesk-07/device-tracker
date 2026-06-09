@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 const TrackerMap = dynamic(() => import("@/components/TrackerMap"), {
   ssr: false,
@@ -76,7 +76,12 @@ export default function Home() {
   }
 
   async function loadDevices(userId: string) {
-    const { data, error } = await supabase
+    if (!supabase) {
+      setMessage("Supabase environment variables are missing in this deployment.");
+      return;
+    }
+
+    const { data, error } = await supabase!
       .from("devices")
       .select("id,name,type")
       .eq("user_id", userId)
@@ -97,12 +102,17 @@ export default function Home() {
 
   async function handleAuth(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!supabase) {
+      setAuthMessage("Supabase environment variables are missing in this deployment.");
+      return;
+    }
     setAuthMessage("Working...");
 
     const authRequest =
       authMode === "signup"
-        ? supabase.auth.signUp({ email, password })
-        : supabase.auth.signInWithPassword({ email, password });
+        ? supabase!.auth.signUp({ email, password })
+        : supabase!.auth.signInWithPassword({ email, password });
 
     const { error } = await authRequest;
 
@@ -115,8 +125,12 @@ export default function Home() {
   }
 
   async function logout() {
+    if (!supabase) {
+      return;
+    }
+
     stopTracking();
-    await supabase.auth.signOut();
+    await supabase!.auth.signOut();
     setDevices([]);
     setSelectedDeviceId(null);
     setLocation(null);
@@ -124,6 +138,11 @@ export default function Home() {
   }
 
   async function saveDevice() {
+    if (!supabase) {
+      setMessage("Supabase environment variables are missing in this deployment.");
+      return;
+    }
+
     const user = session?.user;
     if (!user) {
       setMessage("Login first, then create a device.");
@@ -136,7 +155,7 @@ export default function Home() {
       return;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase!
       .from("devices")
       .insert({ user_id: user.id, name: cleanName, type: deviceType })
       .select("id,name,type")
@@ -153,6 +172,10 @@ export default function Home() {
   }
 
   async function saveLocationToDatabase(point: LocationPoint) {
+    if (!supabase) {
+      return;
+    }
+
     const user = userRef.current;
     const deviceId = selectedDeviceIdRef.current;
 
@@ -167,7 +190,7 @@ export default function Home() {
 
     lastSavedAtRef.current = now;
 
-    const { error } = await supabase.from("locations").insert({
+    const { error } = await supabase!.from("locations").insert({
       user_id: user.id,
       device_id: deviceId,
       latitude: point.latitude,
@@ -299,6 +322,18 @@ export default function Home() {
   useEffect(() => {
     const statusTimer = window.setTimeout(refreshBrowserStatus, 0);
 
+    if (!supabase) {
+      window.setTimeout(() => {
+        setAuthMessage("Add Supabase environment variables in Vercel, then redeploy.");
+      }, 0);
+      return () => {
+        window.clearTimeout(statusTimer);
+        if (watchIdRef.current !== null) {
+          navigator.geolocation.clearWatch(watchIdRef.current);
+        }
+      };
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       if (data.session?.user) {
@@ -351,6 +386,12 @@ export default function Home() {
             </div>
           </div>
         </header>
+
+        {!isSupabaseConfigured ? (
+          <div className="mt-5 rounded-md border border-[#f2c6bd] bg-[#fff1ee] p-4 text-sm font-medium text-[#8d2d20]">
+            Supabase is not configured for this deployment. Add the two NEXT_PUBLIC_SUPABASE variables in Vercel and redeploy.
+          </div>
+        ) : null}
 
         <div className="grid flex-1 gap-5 py-6 lg:grid-cols-[380px_1fr]">
           <aside className="space-y-5">
